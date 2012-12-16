@@ -26,7 +26,7 @@
 // INFO {{{
 let INFO =
 <>
-  <plugin name="Twittperator" version="1.18.0"
+  <plugin name="Twittperator" version="1.19.0"
           href="https://github.com/vimpr/vimperator-plugins/raw/master/twittperator.js"
           summary="Twitter Client using OAuth and Streaming API">
     <author email="teramako@gmail.com" href="http://d.hatena.ne.jp/teramako/">teramako</author>
@@ -175,7 +175,7 @@ let INFO =
         Write the plugin.
     </p>
   </plugin>
-  <plugin name="Twittperator" version="1.18.0"
+  <plugin name="Twittperator" version="1.19.0"
           href="https://github.com/vimpr/vimperator-plugins/raw/master/twittperator.js"
           lang="ja"
           summary="OAuth/StreamingAPI対応Twitterクライアント">
@@ -1583,6 +1583,7 @@ let INFO =
           updateRetryTimer(restart);
           let lines = data.split(/\r\n|[\r\n]/);
           if (lines.length >= 2) {
+            restartCount = 0;
             lines[0] = buf + lines[0];
             for (let [, line] in Iterator(lines.slice(0, -1))) {
               try {
@@ -1628,6 +1629,7 @@ let INFO =
     return {
       start: start,
       stop: stop,
+      resetRestartCount: function () (restartCount = 0),
       addListener: function(func) listeners.push(func),
       removeListener: function(func) (listeners = listeners.filter(function(l) (l != func))),
       clearPluginData: clearPluginData
@@ -1770,6 +1772,9 @@ let INFO =
       }
       xhr.send(null);
     }, // }}}
+    getPluginNameFromFile: function(file) { // {{{
+      return file.leafName.replace(/\..*/, "");
+    }, // }}}
   }; // }}}
   let Twittperator = { // {{{
     activitySummary: function(id) { // {{{
@@ -1838,20 +1843,33 @@ let INFO =
         let (name = file.leafName.replace(/\..*/, "").replace(/-/g, "_"))
           liberator.globalVariables["twittperator_plugin_" + name];
 
-      function loadPluginFromDir(checkGV) {
+      function loadPluginFromDir(checkGV, candidates) {
         return function(dir) {
           dir.readDirectory().forEach(function(file) {
-            if (/\.tw$/.test(file.path) && (!checkGV || isEnabled(file)))
-              Twittperator.sourceScriptFile(file);
+            if (/\.tw$/.test(file.path) && (!checkGV || isEnabled(file))) {
+              if (candidates) {
+                self._plugins.candidates[Utils.getPluginNameFromFile(file)] = file;
+              } else {
+                Twittperator.sourceScriptFile(file);
+              }
+            }
           });
         }
       }
 
+      let self = this;
+      this._plugins = {
+        candidates: {},
+        loaded: {}
+      };
+
       ChirpUserStream.clearPluginData();
       TrackingStream.clearPluginData();
 
-      io.getRuntimeDirectories("plugin/twittperator").forEach(loadPluginFromDir(true));
-      io.getRuntimeDirectories("twittperator").forEach(loadPluginFromDir(false));
+      for (let [, c] in Iterator([true, false])) {
+        io.getRuntimeDirectories("plugin/twittperator").forEach(loadPluginFromDir(true, c));
+        io.getRuntimeDirectories("twittperator").forEach(loadPluginFromDir(false, c));
+      }
     }, // }}}
     lookupUser: function(users) { // {{{
       function showUsersInfo(json) { // {{{
@@ -2082,31 +2100,39 @@ let INFO =
       });
     }, // }}}
     sourceScriptFile: function(file) { // {{{
-      // XXX 悪い子向けのハックです。すみません。 *.tw ファイルを *.js のように読み込みます。
-      let script = liberator.plugins.contexts[file.path];
+      let self = this;
 
-      let originalPath = file.path;
-      let hackedPath = originalPath.replace(/\.tw$/, ".js");
+      if (self._plugins.loaded[Utils.getPluginNameFromFile(file)])
+        return true;
 
-      let ugly = {
-        __noSuchMethod__: function (name, args) originalPath[name].apply(originalPath, args),
-        toString: function() {
-          function isFile (caller) {
-            if (!caller)
-              return false;
-            if (caller === io.File)
-              return true;
-            return isFile(caller.caller);
-          }
-          return isFile(arguments.callee.caller) ? originalPath : hackedPath;
-        }
-      };
+      let stdScript = liberator.plugins.contexts[file.path];
 
       try {
-        io.source(ugly, false);
+        let script = Script(file);
+
+        script.__context__.require = function (names) {
+          if (!(names instanceof Array))
+            names = [names];
+          names.forEach(function (name) {
+            if (self._plugins.loaded[name])
+              return;
+            let lib = self._plugins.candidates[name];
+            if (lib)
+              self.sourceScriptFile(lib);
+            else
+              throw "Not found twittperator plugin: " + name;
+          });
+        };
+
+        let uri = services.get("io").newFileURI(file);
+        let suffix = '?' + encodeURIComponent(services.get("UUID").generateUUID().toString());
+
+        liberator.loadScript(uri.spec + suffix, script);
+        self._plugins.loaded[Utils.getPluginNameFromFile(file)] = script;
+
       } finally {
-        if (script)
-          liberator.plugins[script.NAME] = script;
+        if (stdScript)
+          liberator.plugins[stdScript.NAME] = stdScript;
       }
     }, // }}}
     withProtectedUserConfirmation: function(check, actionName, action) { // {{{
@@ -2451,6 +2477,11 @@ let INFO =
       description: "Find people with the words.",
       action: function(arg) Twittperator.showUsersSeachResult(arg),
     }),
+    SubCommand({
+      command: ["restartstreams"],
+      description: "Restart streams",
+      action: function(arg) startStreams(),
+    }),
   ];
 
   SubCommands.add = function(subCmd) {
@@ -2651,6 +2682,22 @@ let INFO =
   let ChirpUserStream = Stream({ name: 'chirp stream', url: "https://userstream.twitter.com/2/user.json" });
   let TrackingStream = Stream({ name: 'tracking stream', url: "https://stream.twitter.com/1/statuses/filter.json" });
 
+  let startStreams = function () {
+    ChirpUserStream.resetRestartCount();
+    TrackingStream.resetRestartCount();
+
+    if (setting.useChirp){
+      if(setting.allReplies)
+        ChirpUserStream.start({"replies":"all"});
+      else
+        ChirpUserStream.start();
+    }
+
+    let trackWords = setting.trackWords || Store.get("trackWords");
+    if (trackWords)
+      TrackingStream.start({track: trackWords});
+  };
+
   // 公開オブジェクト
   __context__.OAuth = tw;
   __context__.ChirpUserStream = ChirpUserStream;
@@ -2665,20 +2712,7 @@ let INFO =
 
   Twittperator.loadPlugins();
 
-  liberator.registerObserver(
-    'enter',
-    function () {
-    if (setting.useChirp){
-      if(setting.allReplies)
-        ChirpUserStream.start({"replies":"all"});
-      else
-        ChirpUserStream.start();
-    }
-
-    let trackWords = setting.trackWords || Store.get("trackWords");
-    if (trackWords)
-      TrackingStream.start({track: trackWords});
-  });
+  liberator.registerObserver('enter', startStreams);
 
   __context__.onUnload = function() {
     Store.set("history", history);

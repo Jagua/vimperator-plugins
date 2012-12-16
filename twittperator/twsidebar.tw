@@ -125,9 +125,12 @@ liberator.modules.TWAnekoSB = ANekoSB = (function () {
       XML.ignoreWhitespace = true;
       let xml;
       let sbWidth = getSidebarWindow().document.width;
+      let richlistitemClasses = [className('tweet-panel'), className('tweet-' + t.type)];
+      let nameClass = t.protected ? className('tweet-protected') : '';
       xml =
         <richlistitem
-          class={[className('tweet-panel'), className('tweet-' + t.type)].join(' ')}
+          id={t.id}
+          class={richlistitemClasses.join(' ')}
           style={[
             "font-size: " + px(Config.fontSize - (t.text.length > 70 ? 2 : 0)),
             "width: " + px(sbWidth - 100) + ' !important'
@@ -139,7 +142,7 @@ liberator.modules.TWAnekoSB = ANekoSB = (function () {
             </vbox>
             <vbox style={"width: " + (sbWidth - 48 - 35) + "px !important"}>
               <hbox>
-                <label style="font-weight: bold">{escapeBreakers(t.name)}</label>
+                <label class={nameClass} style="font-weight: bold">{escapeBreakers(t.name)}</label>
                 <spacer flex="1"/>
                 <label>{t.sub || ''}</label>
               </hbox>
@@ -283,6 +286,8 @@ liberator.modules.TWAnekoSB = ANekoSB = (function () {
              ||
              (msg.direct_message);
 
+    let protected = msg.user && msg.user.protected;
+
     // Fav test
     try {
       //liberator.log(JSON.stringify(msg, null, 2));
@@ -291,7 +296,8 @@ liberator.modules.TWAnekoSB = ANekoSB = (function () {
           name: '>' + msg.target_object.user.screen_name + '<',
           img: msg.target_object.user.profile_image_url,
           text: msg.target_object.text,
-          type: 'favorite'
+          type: 'favorite',
+          protected: protected
         };
         appendTweet(t, 'home', streamName);
       }
@@ -311,6 +317,7 @@ liberator.modules.TWAnekoSB = ANekoSB = (function () {
 
     if (msg.direct_message) {
       t = {
+        id: msg.id,
         name: msg.direct_message.sender.screen_name,
         img: msg.direct_message.sender.profile_image_url,
         text: msg.direct_message.text,
@@ -319,6 +326,7 @@ liberator.modules.TWAnekoSB = ANekoSB = (function () {
       };
     } else if (msg.retweeted_status) {
       t = {
+        id: msg.id,
         name: my ? msg.user.screen_name : msg.retweeted_status.user.screen_name,
         img: my ? msg.user.profile_image_url : msg.retweeted_status.user.profile_image_url,
         text: msg.retweeted_status.text,
@@ -362,6 +370,7 @@ liberator.modules.TWAnekoSB = ANekoSB = (function () {
       dummy = true;
     } else if (msg.user && msg.text && msg.in_reply_to_screen_name == screenName) {
       t = {
+        id: msg.id,
         name: msg.user.screen_name,
         img: msg.user.profile_image_url,
         text: msg.text,
@@ -369,6 +378,7 @@ liberator.modules.TWAnekoSB = ANekoSB = (function () {
       };
     } else if (msg.user && msg.text) {
       t = {
+        id: msg.id,
         name: msg.user.screen_name,
         img: msg.user.profile_image_url,
         text: msg.text,
@@ -377,6 +387,8 @@ liberator.modules.TWAnekoSB = ANekoSB = (function () {
     }
 
     if (t) {
+      t.protected = protected;
+
       if (Config.earthquake && /\u5730\u9707/.test(t.text) && msg.text.length < 20 && msg.user && msg.user.location) {
         t.text += ' [\u5730\u57DF: ' + msg.user.location + ']';
       }
