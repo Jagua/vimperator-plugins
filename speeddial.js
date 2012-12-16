@@ -1,5 +1,5 @@
 // Vimperator plugin: "SpeedDial"
-// Last Change: 22-Oct-2008. Jan 2008
+// Last Change: 01-Oct-2012. Jan 2008
 // License: Creative Commons
 // Maintainer: mattn <mattn.jp@gmail.com> - http://mattn.kaoriya.net/
 //
@@ -28,10 +28,21 @@
             bang: true,
             completer: function(filter) {
                 candidates = [];
-                for (var n = 1; n <= 9; n++) {
-                    var url = pref.getComplexValue("extensions.speeddial.thumbnail-" + n + "-url", nsISupportsString).data;
-                    var label = pref.getComplexValue("extensions.speeddial.thumbnail-" + n + "-label", nsISupportsString).data;
-                    if (url && label) candidates.push([url, n + ":" + label]);
+                var numDials = 0;
+                var numGroups = gPrefService.getIntPref("extensions.speeddial.numGroups");
+                for (var n = 1; n <= numGroups; n++) {
+                    var columns = gPrefService.getIntPref("extensions.speeddial.group-" + n + "-columns");
+                    var rows = gPrefService.getIntPref("extensions.speeddial.group-" + n + "-rows");
+                    numDials += columns * rows;
+                }
+                for (var n = 1; n <= numDials; n++) {
+                    var hasUrl = gPrefService.prefHasUserValue("extensions.speeddial.thumbnail-" + n + "-url");
+                    var hasLabel = gPrefService.prefHasUserValue("extensions.speeddial.thumbnail-" + n + "-label");
+                    if (hasUrl && hasLabel) {
+                        var url = pref.getComplexValue("extensions.speeddial.thumbnail-" + n + "-url", nsISupportsString).data;
+                        var label = pref.getComplexValue("extensions.speeddial.thumbnail-" + n + "-label", nsISupportsString).data;
+                        if (url && label) candidates.push([url, n + ":" + label]);
+                    }
                 }
                 return [0,candidates];
             }
